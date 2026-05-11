@@ -1,0 +1,66 @@
+# Continues from supervisor_todo_FINAL.R — uses x_test, y_test, full_fit, selected_loci
+
+test_signature <- x_test[, selected_loci, drop = FALSE]
+n_loci_final   <- length(selected_loci)
+
+missing_pcts <- seq(5, 50, by = 5)
+n_iterations <- 1000          # 100 for testing, 1000 for the final run
+set.seed(42)
+
+results <- data.frame()
+
+for (pct in missing_pcts) {
+  cat("Processing", pct, "% missing...")
+  for (iter in 1:n_iterations) {
+    degraded <- test_signature
+    n_total  <- length(degraded)
+    n_remove <- round(n_total * pct / 100)
+    degraded[sample(n_total, n_remove)] <- NA
+
+    # Recompute distance matrix from degraded data (column-mean fill for distance only)
+    deg_for_dist <- degraded
+    for (j in seq_len(ncol(deg_for_dist))) {
+      cm <- mean(deg_for_dist[, j], na.rm = TRUE)
+      deg_for_dist[is.na(deg_for_dist[, j]), j] <- cm
+    }
+    all.dist <- as.matrix(dist(deg_for_dist))
+
+    # Impute with Ed's k-NN
+    imputed <- impute.knn.custom(degraded, k = 0.05, distmat = all.dist)
+
+    # Predict
+    x_test_degraded <- x_test
+    x_test_degraded[, selected_loci] <- imputed
+    pred <- as.vector(predict(full_fit, newx = x_test_degraded, s = best_lambda_val))
+
+    results <- rbind(results, data.frame(
+      Missing_Pct = pct, Iteration = iter,
+      RMSE = sqrt(mean((pred - y_test)^2)),
+      MAE  = mean(abs(pred - y_test)),
+      R2   = cor(pred, y_test)^2
+    ))
+  }
+  cat(" done\n")
+}
+
+write.csv(results, "missing_data_robustness_CORRECTED.csv", row.names = FALSE)
+
+# Summary table (Table 1)
+summary_tbl <- results %>%
+  group_by(Missing_Pct) %>%
+  summarise(
+    RMSE_mean = mean(RMSE),  RMSE_sd = sd(RMSE),
+    MAE_mean  = mean(MAE),   MAE_sd  = sd(MAE),
+    R2_mean   = mean(R2),    R2_sd   = sd(R2)
+  )
+write.csv(summary_tbl, "missing_data_summary_CORRECTED.csv", row.names = FALSE)
+
+# Boxplot (Fig 8)
+ggplot(results, aes(x = factor(Missing_Pct), y = RMSE)) +
+  geom_boxplot(fill = "#4ECDC4", alpha = 0.7, outlier.size = 0.6) +
+  labs(title = "Missing Data Robustness — 19 CpG Lasso Model",
+       subtitle = paste0(n_iterations, " iterations per increment"),
+       x = "Missing Data (%)", y = "RMSE (years)") +
+  theme_bw(base_size = 13) +
+  theme(plot.title = element_text(face = "bold"))
+ggsave("plateau_RMSE.png", width = 10, height = 6, dpi = 300)
