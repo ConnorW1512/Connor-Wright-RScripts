@@ -128,6 +128,6 @@ This work is shared for academic review only. Please do not redistribute without
 
 ## Acknowledgements
 
-- Dr Ed Schwalbe (project supervisor) — for the custom k-NN imputation function and methodological guidance
+- Dr Ed Schwalbe (project supervisor) — for the guidance across the entire process
 - The original investigators behind GSE138279, GSE99091, GSE92767, GSE59509, and GSE111165 for making their data publicly available
 - Northumbria University Department of Applied Sciences
