@@ -1,0 +1,70 @@
+library(ggplot2)
+library(gridExtra)
+library(grid)
+library(cowplot)
+
+train_beta  <- readRDS("train_beta_CORRECTED.RDS")
+test_beta   <- readRDS("test_beta_CORRECTED.RDS")
+train_pheno <- readRDS("train_pheno_CORRECTED.RDS")
+test_pheno  <- readRDS("test_pheno_CORRECTED.RDS")
+
+all_beta  <- cbind(train_beta, test_beta)
+all_pheno <- rbind(train_pheno, test_pheno)
+
+famous_cpgs <- c("cg16867657", "cg21572722", "cg24724428", "cg07547549",
+                 "cg06639320", "cg02228185", "cg07553761", "cg25809905")
+available_cpgs <- famous_cpgs[famous_cpgs %in% rownames(all_beta)]
+
+plot_data <- data.frame(
+  Age   = all_pheno$Age,
+  Study = all_pheno$GSE_Dataset,
+  t(all_beta[available_cpgs, ])
+)
+
+study_colours <- c("GSE138279" = "#FF6B6B", "GSE99091" = "#B19CD9",
+                   "GSE92767"  = "#4ECDC4", "GSE59509" = "#95D5B2",
+                   "GSE111165" = "#FFD93D")
+
+plots <- list()
+for (cpg in available_cpgs) {
+  cor_test <- cor.test(plot_data$Age, plot_data[[cpg]])
+  r <- round(cor_test$estimate, 3)
+  p <- cor_test$p.value
+  p_label <- ifelse(p < 0.001, "p < 0.001", paste0("p = ", round(p, 3)))
+
+  plots[[cpg]] <- ggplot(plot_data, aes_string(x = "Age", y = cpg, colour = "Study")) +
+    geom_point(size = 1.8, alpha = 0.6) +
+    geom_smooth(method = "lm", se = TRUE, colour = "black",
+                linetype = "dashed", linewidth = 0.7) +
+    scale_colour_manual(values = study_colours) +
+    scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+    labs(title = cpg,
+         subtitle = paste0("r = ", r, ", ", p_label, " (n = ", nrow(plot_data), ")"),
+         x = "Chronological Age (years)", y = "Methylation (\u03b2-value)") +
+    theme_bw() +
+    theme(plot.title = element_text(size = 10, face = "bold"),
+          plot.subtitle = element_text(size = 8),
+          legend.position = "none",
+          panel.grid.minor = element_blank())
+}
+
+legend_plot <- ggplot(plot_data, aes(x = Age, y = Age, colour = Study)) +
+  geom_point() +
+  scale_colour_manual(values = study_colours, name = "GEO Dataset",
+    labels = c("GSE138279" = "GSE138279 (n=65)", "GSE99091" = "GSE99091 (n=57)",
+               "GSE92767"  = "GSE92767 (n=54)",  "GSE59509" = "GSE59509 (n=12)",
+               "GSE111165" = "GSE111165 (n=12)")) +
+  theme_bw() +
+  theme(legend.position = "bottom",
+        legend.title = element_text(size = 11, face = "bold"),
+        legend.text = element_text(size = 10),
+        legend.key.size = unit(0.8, "cm"))
+
+shared_legend <- cowplot::get_legend(legend_plot)
+
+combined_plot <- grid.arrange(grobs = plots, ncol = 4, nrow = 2,
+  top = textGrob("Age-Associated CpG Sites (n = 199 saliva samples)",
+                 gp = gpar(fontsize = 14, fontface = "bold")))
+
+final_plot <- grid.arrange(combined_plot, shared_legend, nrow = 2, heights = c(10, 1))
+ggsave("Famous_8_CpGs_CORRECTED_legend.png", final_plot, width = 16, height = 9, dpi = 300)
