@@ -1,0 +1,82 @@
+library(methylclock)
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+library(grid)
+library(cowplot)
+
+train_beta  <- readRDS("train_beta_CORRECTED.RDS")
+test_beta   <- readRDS("test_beta_CORRECTED.RDS")
+train_pheno <- readRDS("train_pheno_CORRECTED.RDS")
+test_pheno  <- readRDS("test_pheno_CORRECTED.RDS")
+
+all_beta  <- cbind(train_beta, test_beta)
+all_pheno <- rbind(train_pheno, test_pheno)
+
+# Convert to data frame with CpGs as first column (this is the critical step)
+beta_df <- as.data.frame(all_beta)
+beta_df <- cbind(CpGmarker = rownames(beta_df), beta_df)
+rownames(beta_df) <- NULL
+
+# Run DNAmAge
+pred <- DNAmAge(
+  x          = beta_df,
+  clocks     = c("Horvath", "EN", "BLUP"),
+  age        = all_pheno$Age,
+  cell.count = FALSE
+)
+
+study_colours <- c("GSE138279" = "#FF6B6B", "GSE99091" = "#B19CD9",
+                   "GSE92767"  = "#4ECDC4", "GSE59509" = "#95D5B2",
+                   "GSE111165" = "#FFD93D")
+
+make_clock_plot <- function(actual, predicted, study, clock_name) {
+  keep <- !is.na(predicted) & !is.na(actual)
+  actual <- actual[keep]; predicted <- predicted[keep]; study <- study[keep]
+  rmse <- sqrt(mean((actual - predicted)^2))
+  r2   <- cor(actual, predicted)^2
+  cat(sprintf("%s — R² = %.3f | RMSE = %.2f yrs | n = %d\n",
+              clock_name, r2, rmse, sum(keep)))
+
+  df <- data.frame(Actual = actual, Predicted = predicted, Study = study)
+
+  ggplot(df, aes(x = Actual, y = Predicted, colour = Study)) +
+    geom_point(size = 2, alpha = 0.6) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed",
+                colour = "grey40", linewidth = 0.8) +
+    geom_smooth(method = "lm", se = TRUE, colour = "black",
+                linewidth = 0.7, inherit.aes = FALSE,
+                aes(x = Actual, y = Predicted)) +
+    scale_colour_manual(values = study_colours) +
+    labs(title = clock_name,
+         subtitle = sprintf("R² = %.3f, RMSE = %.2f yrs", r2, rmse),
+         x = "Chronological Age (years)", y = "Predicted Age (years)") +
+    theme_bw() +
+    theme(plot.title = element_text(size = 12, face = "bold"),
+          legend.position = "none", panel.grid.minor = element_blank())
+}
+
+clock_plots <- list(
+  Horvath = make_clock_plot(all_pheno$Age, pred$Horvath, all_pheno$GSE_Dataset, "Horvath"),
+  EN      = make_clock_plot(all_pheno$Age, pred$EN,      all_pheno$GSE_Dataset, "EN"),
+  BLUP    = make_clock_plot(all_pheno$Age, pred$BLUP,    all_pheno$GSE_Dataset, "BLUP")
+)
+
+# Shared legend (same construction as Fig 4)
+legend_plot <- ggplot(data.frame(Study = names(study_colours), x = 1, y = 1),
+                      aes(x = x, y = y, colour = Study)) +
+  geom_point(size = 3) +
+  scale_colour_manual(values = study_colours, name = "GEO Dataset",
+    labels = c("GSE138279" = "GSE138279 (n=65)", "GSE99091" = "GSE99091 (n=57)",
+               "GSE92767"  = "GSE92767 (n=54)",  "GSE59509" = "GSE59509 (n=12)",
+               "GSE111165" = "GSE111165 (n=12)")) +
+  theme_bw() + theme(legend.position = "bottom")
+
+shared_legend <- cowplot::get_legend(legend_plot)
+
+combined <- grid.arrange(grobs = clock_plots, ncol = 3, nrow = 1,
+  top = textGrob("Published Epigenetic Clock Benchmarking (n = 199 saliva samples)",
+                 gp = gpar(fontsize = 14, fontface = "bold")))
+
+final_plot <- grid.arrange(combined, shared_legend, nrow = 2, heights = c(10, 1))
+ggsave("Published_Clocks_CORRECTED_legend.png", final_plot, width = 18, height = 7, dpi = 300)
