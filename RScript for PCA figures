@@ -1,0 +1,60 @@
+library(ggplot2)
+
+# Load corrected data
+train <- readRDS("train_beta_CORRECTED.RDS")
+test  <- readRDS("test_beta_CORRECTED.RDS")
+train.pheno <- readRDS("train_pheno_CORRECTED.RDS")
+test.pheno  <- readRDS("test_pheno_CORRECTED.RDS")
+
+# Combine
+all_betas <- cbind(train, test)
+all_pheno <- rbind(train.pheno, test.pheno)
+
+# Top 10,000 most variable CpGs
+cpg_var  <- apply(all_betas, 1, var, na.rm = TRUE)
+top_cpgs <- names(sort(cpg_var, decreasing = TRUE))[1:10000]
+betas_top <- all_betas[top_cpgs, ]
+
+# Handle NAs (drops to ~9249 CpGs)
+betas_top <- betas_top[complete.cases(betas_top), ]
+
+# Run PCA
+pca_result <- prcomp(t(betas_top), center = TRUE, scale. = FALSE)
+pca_df <- as.data.frame(pca_result$x[, 1:2])
+pca_df$SampleID <- rownames(pca_df)
+
+var_explained <- round(summary(pca_result)$importance[2, 1:2] * 100, 1)
+
+pca_df$Age   <- all_pheno$Age[match(pca_df$SampleID, all_pheno$SampleID)]
+pca_df$Study <- all_pheno$GSE_Dataset[match(pca_df$SampleID, all_pheno$SampleID)]
+pca_df$Sex   <- all_pheno$Sex[match(pca_df$SampleID, all_pheno$SampleID)]
+
+# Plot 1 — by Age
+ggplot(pca_df, aes(x = PC1, y = PC2, colour = Age)) +
+  geom_point(size = 3, alpha = 0.85) +
+  scale_colour_gradient2(low = "blue", mid = "purple", high = "red",
+                         midpoint = 50, name = "Age (years)") +
+  labs(title = "PCA of DNA Methylation Data - Coloured by Age",
+       subtitle = "Age range: 6-91 years (N=199)",
+       x = paste0("PC1 (", var_explained[1], "% variance)"),
+       y = paste0("PC2 (", var_explained[2], "% variance)")) +
+  theme_bw(base_size = 13) + theme(plot.title = element_text(face = "bold"))
+
+# Plot 2 — by Sex
+ggplot(pca_df, aes(x = PC1, y = PC2, colour = Sex)) +
+  geom_point(size = 3, alpha = 0.85) +
+  scale_colour_manual(values = c("Female" = "#F8766D", "Male" = "#619CFF")) +
+  labs(title = "PCA of DNA Methylation Data - Coloured by Sex",
+       subtitle = "N = 199 unique samples",
+       x = paste0("PC1 (", var_explained[1], "% variance)"),
+       y = paste0("PC2 (", var_explained[2], "% variance)")) +
+  theme_bw(base_size = 13) + theme(plot.title = element_text(face = "bold"))
+
+# Plot 3 — by Study
+ggplot(pca_df, aes(x = PC1, y = PC2, colour = Study)) +
+  geom_point(size = 3, alpha = 0.85) +
+  labs(title = "PCA of DNA Methylation Data - Coloured by Study",
+       subtitle = "N = 199 unique samples from 5 studies",
+       x = paste0("PC1 (", var_explained[1], "% variance)"),
+       y = paste0("PC2 (", var_explained[2], "% variance)")) +
+  theme_bw(base_size = 13) + theme(plot.title = element_text(face = "bold"))
